@@ -1,0 +1,591 @@
+---
+title: "Neural Network with Keras in R"
+author: "Faisal Amir Maz"
+date: "`r format(Sys.Date(), '%B %e, %Y')`"
+output:
+  html_document:
+    number_sections: true
+    df_print: paged
+    highlight: tango
+    theme: cosmo
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: true
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+<style>
+
+body {
+text-align: justify}
+
+</style>
+
+```{r setup, include=FALSE}
+# clear-up the environment
+rm(list = ls())
+
+# chunk options
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  comment = "#>"
+)
+
+options(scipen = 999)
+```
+
+<style>
+
+body {
+text-align: justify}
+
+</style>
+
+# Neural Network with Keras
+
+In this project, we will use `Keras` to create the architecture and to train the model. `Keras` is a package that helps us implement Deep Learning models quickly. `Keras` makes use of `tensorflow`, an open source tool developed by Google for Deep Learning implementations. Keras and tensorflow used in R only act as mediators, because actually behind the scenes all processes are executed in python.
+
+To test whether the keras model is connected and usable, we can run the following code:
+
+```{r}
+library(keras)
+library(dplyr)
+
+p <- keras_model_sequential(name = "Model Pertama") %>% 
+  
+  # Hidden Layer Pertama
+  layer_dense(units = 3, 
+              input_shape = 3, 
+              activation = "sigmoid", 
+              name = "Hidden_layer") %>% 
+  
+  # Output Layer
+  layer_dense(units = 2, activation = "sigmoid", name = "output")
+
+p
+```
+
+If the model information appears, then the hardware is connected and can be used to create a model.
+
+## MNIST Dataset
+
+We will use the MNIST dataset, which is data containing thousands of digit images of various types of handwriting. We will create a Machine Learning model that can recognize the digits 0 to 9 by learning from the information provided.
+
+```{r echo=FALSE, out.width="80%" }
+knitr::include_graphics("asset/mnist.png")
+```
+
+First, we load the data. MNIST data has been divided into train data and test data so that later cross-validation is not necessary. The data is in the form of a table with information on the target variable (`label`) and the amount of brightness of each pixel in grayscale (black and white).
+
+```{r}
+train_mnist <- read.csv("data_input/mnist/train.csv")
+test_mnist <- read.csv("data_input/mnist/test.csv")
+
+dim(train_mnist)
+dim(test_mnist)
+
+```
+
+Let's see some rows from data train MNIST.
+
+image data -> 28 pixel x 28 pixel
+
+```{r}
+# your code here
+head(train_mnist)
+sqrt(784)
+```
+
+In each image, there are pixels that contain color information (eg light-dark gradations). We will utilize the value of the color information to recognize digits. The first column (label) shows the value of the target variable, namely the digits that appear. The rest is the value in each pixel in each image.
+
+Each image has dimensions of 28 x 28, so the number of pixels it has is 784 pixels.
+
+Before we proceed to the model creation process, let's first try to visualize the digit images to be used by changing the pixel values into an image using the function below.
+
+```{r}
+vizTrain <- function(input){
+  
+  dimmax <- sqrt(ncol(input[,-1]))
+  
+  dimn <- ceiling(sqrt(nrow(input)))
+  par(mfrow=c(dimn, dimn), mar=c(.1, .1, .1, .1))
+  
+  for (i in 1:nrow(input)){
+      m1 <- as.matrix(input[i,2:785])
+      dim(m1) <- c(28,28)
+      
+      m1 <- apply(apply(m1, 1, rev), 1, t)
+      
+      image(1:28, 1:28, 
+            m1, col=grey.colors(255), 
+            # remove axis text
+            xaxt = 'n', yaxt = 'n')
+      text(2, 20, col="white", cex=1.2, input[i, 1])
+  }
+  
+}
+```
+
+Let's try to visualize the first 36 data.
+
+```{r}
+# 36 data pertama
+vizTrain(head(train_mnist, 36))
+```
+
+### Cross-Validation
+We divide the data into training data and validation data with 80% of the data as training data, because the test data provided (`test.csv`) does not have a label and is only used for competition purposes on [Kaggle](https://www. kaggle.com/c/digit-recognizer).
+
+```{r}
+# your code here
+library(rsample)
+set.seed(100)
+
+splitter <- initial_split(data = train_mnist, 
+                          prop = 0.8, 
+                          strata = "label")
+
+data_train <- training(splitter)
+data_test <- testing(splitter)
+
+```
+
+Check proportion on target class on the train data
+
+```{r}
+# your code here
+prop.table(table(data_train$label))
+```
+
+### Data Preprocessing
+
+Before building a model with `Keras`, there are a few things that need to be done to prepare the data:
+
+1. Separating the predictor from the target variable
+2. Change the predictor to a matrix/array
+3. Perform one-hot encoding if the target variable is a category
+
+Since the predictor is the brightness value of each pixel, we know that the value range can be between 0 and 255. Each pixel will be scaled by dividing the pixel value by 255. After scaling, each predictor column will have a range between 0-1.
+
+```{r}
+# pre processing
+library(dplyr)
+
+train_x <- data_train %>% 
+  select(-label) %>%  # seleksi untuk variabel prediktor
+  as.matrix()/255
+
+train_y <- data_train$label # seleksi untuk variabel target
+
+test_x <- data_test %>% 
+  select(-label) %>% 
+  as.matrix()/255
+
+test_y <- data_test$label
+
+```
+
+> Especially for image data, we can do scaling by dividing the data with the largest value, namely 255
+
+Here is the proof:
+```{r}
+range(data_train$pixel200)/255
+```
+
+
+To change the feature so that it can be accepted by both Keras and Python, we must change it to an array format. using the `array_reshape(x,dim)` function.
+
+```{r}
+library(keras)
+train_x <- array_reshape(train_x, dim = dim(train_x))
+test_x <- array_reshape(test_x, dim = dim(test_x))
+```
+
+
+Next, we change the category from 0-9 to a one-hot encoding using `to_categorical()` from `keras.`
+
+```{r}
+# One-hot encoding target variable
+train_y <- to_categorical(train_y , num_classes = 10)
+test_y <- to_categorical(test_y , num_classes = 10)
+```
+
+#### 📝 Steps taken when data preprocessing
+
+1. Separating data between target labels (y) and predictors (x)
+  
+   - predictor (x) = use the select function
+   - target(y) = use $
+  
+2. For train_x and test_x data, convert them into matrix form, using the function `as.matrix()`
+3. The data for train_x and test_x are scaled by dividing by 255 -> `/255`
+4. For train_x and test_x data, you need to reshape the array using the `array_reshape(x,dim)` function
+5. For train_y and test_y data, in one-hot encoding use the function `to_categorical(data, num_classes)`
+
+
+# Neural Network Architecture
+
+The next step is to build a Neural Network architecture. Some provisions when creating a Neural Network architecture:
+
+1. Always start with `keras_model_sequential()`
+2. The first layer created will be the first hidden layer
+3. The input layer is created by entering the `input_shape` parameter in the first layer
+4. The last layer created will be the output layer
+
+First, we first create an object to store information on the number of columns from the predictor and the number of categories from the target variable.
+
+```{r}
+input_dim <- ncol(train_x)
+num_class <- n_distinct(data_train$label)
+```
+
+We will create a Neural Network model with the following conditions:
+
+- Input layer: 784 predictors (28x28 pixel image)
+- Hidden Layer 1: 64 neurons with activation function = relu
+- Hidden Layer 2: 16 neurons with activation function = relu
+- Output Layer: 10 neurons (according to the number of categories 0-9) with activation function = softmax
+
+**Best Practice** determining the number of neurons for each layer:
+
+- The deeper the number of neurons, the less, because general information has been captured in the initial hidden layer
+- The number of neurons follows the square of 2: 2, 4, 8, 16, 32, 64, 128, ...
+
+```{r}
+# Set seed bobot awal
+library(tensorflow)
+set_random_seed(100)
+
+# Membuat arsitektur
+model1 <- keras_model_sequential(name = "model_mnist") %>% 
+  
+  # input layer + hidden layer 1
+  layer_dense(units = 64, #jumlah node pada hidden layer 1
+              activation = "relu", #activation function pada hidden layer 1
+              name = "hidden_1", #penamaan
+              input_shape = input_dim #jumlah node pada input layer 
+              ) %>% 
+  
+  # hidden layer 2
+  layer_dense(units = 16, 
+              activation = "relu", 
+              name = "hidden_2"
+              ) %>% 
+  
+  # output layer
+  layer_dense(units = num_class, 
+              activation = "softmax", 
+              name = "output")
+
+model1
+```
+```{r}
+(16+1) * 10
+```
+
+Information:
+
+- `Total params` = Total weights and biases that the model has
+- `Trainable param` = parameters/connections and biases whose weights can change according to the training process
+- `Non-trainable param` = weight/parameter values and biases don't change or are locked in value
+
+# Compile models
+
+The next step is to determine the error function, optimizer, and metrics that will be shown during training.
+
+**Error/Loss Function** according to the type of case:
+
+- Regression: Sum of Squared Error (SSE), Mean Squared Error (MSE), Mean Absolute Percentage Error (MAPE)
+- Classification of 2 classes: Binary Cross-Entropy -> `binary_crossentropy`
+- Classification > 2 classes: Categorical Cross-Entropy -> `categorical_crossentropy`
+
+[Loss Function Reference](https://keras.rstudio.com/reference/loss_mean_squared_error.html)
+
+**Optimizer** or how the model updates weights and learns:
+
+- SGD: Stochastic Gradient Descent (update from gradient decent)
+- ADAM: Adam Optimizer (update from sgd)
+- learning_rate: the learning rate of the optimizer when doing back propagation
+
+[Referensi Optimizer](https://keras.rstudio.com/reference/index.html#section-optimizers)
+
+```{r}
+# set loss function and optimizer
+model1 %>% 
+  compile(loss = "categorical_crossentropy",
+          optimizer = optimizer_sgd(learning_rate = 0.1),
+          metrics = "accuracy")
+
+```
+
+# Model Fitting
+
+Furthermore, Neural Networks using `hard` will update the weights after processing some of the data from the train data, which is usually 1 batch. When the model has `feed forward` with 1 batch of data, for example `batch size` = 32 (1 batch = 32 data), the model will do `back propagation` and update the weights. Only then will the model feed forward again using the next 32 data. At this stage, 1 Epoch is when the model has been trained using all the data.
+
+Suppose the entire data train consists of 33600 data rows. With batch size = 4200, the train data will be divided into 8 batches.
+
+$$
+Sum\ of\ batch = \frac{Sum\ of\ data}{Batch\ size}\\
+Sum\ of\ batch = \frac{33600}{4200} = 8
+$$
+```{r}
+33600/4200
+```
+
+Then 1 epoch in the Neural Network is `hard` when the model has finished feeding forward and updating the weights via back propagation using those 8 batches.
+
+Karakterisitk batch size:
+
+- Semakin kecil batch size = training semakin lama
+- Batch size kecil cenderung memiliki performance lebih baik
+
+
+```{r}
+history <- model1 %>% fit(x = train_x, #prediktor
+               y = train_y, #label
+               epoch = 10, #jumlah iterasi
+               batch_size = 4200, #jumlah data per batch
+               validation_data = list( test_x , test_y ), #data test hasil cross validation
+               verbose = 1) #untuk keperluan tracing
+
+plot(history)
+```
+
+> From the plot above, the model we created is not **overfitting**, but we need to look further for each class using the coffusion matrix
+
+# Model Evaluation
+
+Prediction 
+
+```{r}
+# prediksi
+pred <- predict(model1, test_x) %>% 
+  k_argmax() %>% # untuk mengambil nilai probability paling besar
+  as.array() %>% 
+  as.factor()
+```
+
+Evaluating model performance using confusion matrix
+
+```{r}
+# evaluasi
+library(caret)
+confusionMatrix(data = pred, reference = as.factor(data_test$label))
+```
+
+
+# 📝 Model Improvement
+
+We can improve the model by adjusting the hyperparameter, such as:
+
+1. Total of hidden layer and total nodes on hidden layer
+2. Learning rate
+3. Epoch
+4. Batch size
+5. Optimizer
+
+
+## Tuning 1
+
+We try to change the number of units in each layer with the following conditions:
+
+- Input layer: 784 predictors (28x28 pixel image)
+- Hidden Layer 1: 128 neurons with activation function = relu
+- Hidden Layer 2: 32 neurons with activation function = relu
+- Output Layer: 10 neurons (according to the number of categories 0-9) with activation function = softmax
+
+```{r}
+set_random_seed(100)
+
+model_tuning1 <- keras_model_sequential(name = "model_tuning1") %>% 
+  
+  # input layer + hidden layer 1
+  layer_dense(units = 128, #jumlah node pada hidden layer 1
+              activation = "relu", #activation function pada hidden layer 1
+              name = "hidden_1", #penamaan
+              input_shape = input_dim #jumlah node pada input layer 
+              ) %>% 
+  
+  # hidden layer 2
+  layer_dense(units = 32, 
+              activation = "relu", 
+              name = "hidden_2"
+              ) %>% 
+  
+  # output layer
+  layer_dense(units = num_class, 
+              activation = "softmax", 
+              name = "output")
+
+```
+
+```{r}
+# set loss function and optimizer for model tuning 1
+model_tuning1 %>% 
+  compile(loss = "categorical_crossentropy",
+          optimizer = optimizer_sgd(lr = 0.1),
+          metrics = "accuracy")
+```
+
+
+```{r}
+# train model
+history_tune1 <- model_tuning1 %>% fit(x = train_x, #prediktor
+               y = train_y, #label
+               epoch = 10, #jumlah iterasi
+               batch_size = 4200, #jumlah data per batch
+               validation_data = list( test_x , test_y ), #data test hasil cross validation
+               verbose = 1) #untuk keperluan tracing
+
+plot(history_tune1)
+```
+Insight Model Tuning 1
+> loss: 0.463
+    accuracy: 0.875
+    val_loss: 0.4439
+val_accuracy: 0.8811
+
+## Tuning 2
+
+We try to increase the number of hidden layers with the following conditions:
+
+- Input layer: 784 predictors (28x28 pixel image)
+- Hidden Layer 1: 128 neurons with activation function = relu
+- Hidden Layer 2: 32 neurons with activation function = relu
+- Hidden Layer 3: 16 neurons with activation function = relu
+- Output Layer: 10 neurons (according to the number of categories 0-9) with activation function = softmax
+
+```{r}
+set_random_seed(100)
+model_tuning2 <- keras_model_sequential(name = "model_tuning2") %>% 
+  
+  # input layer + hidden layer 1
+  layer_dense(units = 128, #jumlah node pada hidden layer 1
+              activation = "relu", #activation function pada hidden layer 1
+              name = "hidden_1", #penamaan
+              input_shape = input_dim #jumlah node pada input layer 
+              ) %>% 
+  
+  # hidden layer 2
+  layer_dense(units = 32, 
+              activation = "relu", 
+              name = "hidden_2"
+              ) %>% 
+  
+  # hidden layer 3
+  layer_dense(units = 16,
+              activation = "relu",
+              name = "hidden_3"
+              ) %>% 
+  
+  # output layer
+  layer_dense(units = num_class, 
+              activation = "softmax", 
+              name = "output")
+
+
+
+```
+
+```{r}
+# set loss function and optimizer untuk model tuning 2
+model_tuning2 %>% 
+  compile(loss = "categorical_crossentropy",
+          optimizer = optimizer_adam(lr = 0.1),
+          metrics = "accuracy")
+```
+
+
+```{r}
+# train model
+history_tune2 <- model_tuning2 %>% fit(x = train_x, #prediktor
+               y = train_y, #label
+               epoch = 50, #jumlah iterasi
+               batch_size = 2100, #jumlah data per batch
+               validation_data = list( test_x , test_y ), #data test hasil cross validation
+               verbose = 1)
+
+plot(history_tune2)
+```
+```{r}
+history_tune2
+```
+
+
+Insight Model Tuning 2
+>         loss: 0.6675
+    accuracy: 0.7895
+    val_loss: 0.7032
+val_accuracy: 0.7521 
+
+Adding hidden layer means increases code complexity and processing time. It would need much more epoch to train model. It isn't just a waste of coding effort and processor resources—it may actually do positive harm by making the network more susceptible to overtraining.
+___________________________________________
+
+
+## Tuning 3
+
+- Input layer: 784 predictors (28x28 pixel image)
+- Hidden Layer 1: 128 neurons with activation function = relu
+- Hidden Layer 2: 32 neurons with activation function = relu
+- Output Layer: 10 neurons (according to the number of categories 0-9) with activation function = softmax
+
+```{r}
+# your code here
+set_random_seed(100)
+model_tuning3 <- keras_model_sequential(name = "model_tuning3") %>% 
+  
+  # input layer + hidden layer 1
+  layer_dense(units = 128, #jumlah node pada hidden layer 1
+              activation = "relu", #activation function pada hidden layer 1
+              name = "hidden_1", #penamaan
+              input_shape = input_dim #jumlah node pada input layer 
+              ) %>% 
+  
+  # hidden layer 2
+  layer_dense(units = 32, 
+              activation = "relu", 
+              name = "hidden_2"
+              ) %>% 
+  
+  # output layer
+  layer_dense(units = num_class, 
+              activation = "softmax", 
+              name = "output")
+
+```
+
+
+
+```{r}
+model_tuning3 %>% 
+  compile(loss = "categorical_crossentropy",
+          optimizer = optimizer_sgd(lr = 0.1),
+          metrics = "accuracy")
+```
+
+
+```{r}
+# train model
+history_tune3 <- model_tuning3 %>% fit(x = train_x, #prediktor
+               y = train_y, #label
+               epoch = 15, #jumlah iterasi
+               batch_size = 256, #jumlah data per batch
+               validation_data = list( test_x , test_y ), #data test hasil cross validation
+               verbose = 1)
+
+plot(history_tune3)
+```
+```{r}
+history_tune3
+```
+
+
+By adjusting the batch size to 256, we get the accuracy 97%. This is the best performance model so far. Not only having the good performance but also we by decreasing batch size we can have a good performance with fewer epoch. This means we used a smaller amount of computing source. This is also better from economy side.
